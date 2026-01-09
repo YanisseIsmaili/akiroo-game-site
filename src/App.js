@@ -1,11 +1,11 @@
 import React from 'react';
-import LoLDodgeTrainer from './LoLDodgeTrainer';
+import MobaCharacter from './MobaCharacter';
 import './App.css';
 
 function App() {
   return (
     <div className="App">
-      <LoLDodgeTrainer />
+      <MobaCharacter />
     </div>
   );
 }
