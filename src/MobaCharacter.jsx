@@ -8,8 +8,11 @@ const MobaCharacter = () => {
   const [isMouseDown, setIsMouseDown] = useState(false);
   const [cameraLocked, setCameraLocked] = useState(true);
   const [cameraOffset, setCameraOffset] = useState({ x: 0, y: 0 });
+  const [projectiles, setProjectiles] = useState([]);
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
+  const projectileAnimationRef = useRef(null);
+  const nextProjectileId = useRef(0);
 
   const MOVE_SPEED = 200; // pixels par seconde
   const CHARACTER_SIZE = 30;
@@ -17,6 +20,31 @@ const MobaCharacter = () => {
   const CANVAS_HEIGHT = 600;
   const WORLD_WIDTH = 2000;
   const WORLD_HEIGHT = 1500;
+
+  // Types de projectiles inspirés d'Ezreal
+  const PROJECTILE_TYPES = {
+    Q_MYSTIC_SHOT: {
+      width: 12, // 80 unités LoL converti pour notre jeu
+      speed: 300, // Rapide comme le Q d'Ezreal
+      damage: 15,
+      color: '#FFD700', // Doré
+      name: 'Mystic Shot'
+    },
+    W_ESSENCE_FLUX: {
+      width: 10, // Un peu plus fin
+      speed: 250, // Moyennement rapide
+      damage: 12,
+      color: '#00CED1', // Cyan
+      name: 'Essence Flux'
+    },
+    R_TRUESHOT: {
+      width: 25, // Large comme l'ulti d'Ezreal
+      speed: 200, // Plus lent mais plus gros
+      damage: 30,
+      color: '#FF4500', // Orange-Rouge
+      name: 'Trueshot Barrage'
+    }
+  };
 
   // Convertir les coordonnées écran en coordonnées monde
   const screenToWorld = (screenX, screenY) => {
@@ -85,6 +113,68 @@ const MobaCharacter = () => {
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [cameraLocked, position]);
 
+  // Spawner des projectiles régulièrement
+  useEffect(() => {
+    const spawnInterval = setInterval(() => {
+      if (hp > 0) { // Ne pas spawner si le personnage est mort
+        spawnProjectile();
+      }
+    }, 1500); // Un projectile toutes les 1.5 secondes
+
+    return () => clearInterval(spawnInterval);
+  }, [position, hp]);
+
+  // Animation des projectiles
+  useEffect(() => {
+    let lastTime = performance.now();
+
+    const animateProjectiles = (currentTime) => {
+      const deltaTime = (currentTime - lastTime) / 1000;
+      lastTime = currentTime;
+
+      setProjectiles(prevProjectiles => {
+        const updatedProjectiles = prevProjectiles
+          .map(proj => ({
+            ...proj,
+            x: proj.x + proj.vx * deltaTime,
+            y: proj.y + proj.vy * deltaTime
+          }))
+          .filter(proj => {
+            // Vérifier collision avec le personnage (utilise la largeur du projectile)
+            const dx = proj.x - position.x;
+            const dy = proj.y - position.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < CHARACTER_SIZE / 2 + proj.type.width) {
+              // Collision ! Infliger des dégâts selon le type de projectile
+              takeDamage(proj.type.damage);
+              return false; // Retirer le projectile
+            }
+
+            // Retirer les projectiles hors du monde
+            if (proj.x < -100 || proj.x > WORLD_WIDTH + 100 || 
+                proj.y < -100 || proj.y > WORLD_HEIGHT + 100) {
+              return false;
+            }
+
+            return true;
+          });
+
+        return updatedProjectiles;
+      });
+
+      projectileAnimationRef.current = requestAnimationFrame(animateProjectiles);
+    };
+
+    projectileAnimationRef.current = requestAnimationFrame(animateProjectiles);
+
+    return () => {
+      if (projectileAnimationRef.current) {
+        cancelAnimationFrame(projectileAnimationRef.current);
+      }
+    };
+  }, [position]);
+
   // Gérer le clic sur le canvas
   const updateTargetPosition = (e) => {
     const canvas = canvasRef.current;
@@ -133,6 +223,54 @@ const MobaCharacter = () => {
       });
       setCameraLocked(false);
     }
+  };
+
+  // Créer un projectile depuis un bord aléatoire
+  const spawnProjectile = () => {
+    const side = Math.floor(Math.random() * 4); // 0: haut, 1: droite, 2: bas, 3: gauche
+    let startX, startY;
+    
+    switch(side) {
+      case 0: // Haut
+        startX = Math.random() * WORLD_WIDTH;
+        startY = 0;
+        break;
+      case 1: // Droite
+        startX = WORLD_WIDTH;
+        startY = Math.random() * WORLD_HEIGHT;
+        break;
+      case 2: // Bas
+        startX = Math.random() * WORLD_WIDTH;
+        startY = WORLD_HEIGHT;
+        break;
+      case 3: // Gauche
+        startX = 0;
+        startY = Math.random() * WORLD_HEIGHT;
+        break;
+    }
+
+    // Choisir un type de projectile aléatoire
+    const types = Object.values(PROJECTILE_TYPES);
+    const projectileType = types[Math.floor(Math.random() * types.length)];
+
+    // Calculer la direction vers le personnage avec un peu d'aléatoire
+    const targetX = position.x + (Math.random() - 0.5) * 200;
+    const targetY = position.y + (Math.random() - 0.5) * 200;
+    const dx = targetX - startX;
+    const dy = targetY - startY;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    const newProjectile = {
+      id: nextProjectileId.current++,
+      x: startX,
+      y: startY,
+      vx: (dx / distance) * projectileType.speed,
+      vy: (dy / distance) * projectileType.speed,
+      type: projectileType,
+      angle: Math.atan2(dy, dx)
+    };
+
+    setProjectiles(prev => [...prev, newProjectile]);
   };
 
   // Animation du mouvement
@@ -323,6 +461,72 @@ const MobaCharacter = () => {
       ctx.fill();
     }
 
+    // Dessiner les projectiles
+    projectiles.forEach(proj => {
+      const projWidth = proj.type.width;
+      
+      // Dessiner le projectile comme un rectangle arrondi orienté
+      ctx.save();
+      ctx.translate(proj.x, proj.y);
+      ctx.rotate(proj.angle);
+
+      // Ombre du projectile
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.beginPath();
+      ctx.ellipse(2, 2, projWidth + 2, projWidth / 2 + 1, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Corps principal du projectile (ovale allongé)
+      const gradient = ctx.createLinearGradient(-projWidth * 2, 0, projWidth * 2, 0);
+      gradient.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
+      gradient.addColorStop(0.5, proj.type.color);
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0.3)');
+      
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, projWidth * 1.5, projWidth / 1.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bordure brillante
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.7;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+
+      // Point central lumineux
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.arc(0, 0, projWidth / 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+
+      // Traînée du projectile
+      const trailLength = projWidth * 3;
+      const trailAngle = Math.atan2(proj.vy, proj.vx);
+      
+      const trailGradient = ctx.createLinearGradient(
+        proj.x, proj.y,
+        proj.x - Math.cos(trailAngle) * trailLength,
+        proj.y - Math.sin(trailAngle) * trailLength
+      );
+      trailGradient.addColorStop(0, proj.type.color);
+      trailGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      
+      ctx.strokeStyle = trailGradient;
+      ctx.lineWidth = projWidth / 2;
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(proj.x, proj.y);
+      ctx.lineTo(
+        proj.x - Math.cos(trailAngle) * trailLength,
+        proj.y - Math.sin(trailAngle) * trailLength
+      );
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    });
+
     // Restaurer le contexte
     ctx.restore();
 
@@ -343,7 +547,7 @@ const MobaCharacter = () => {
     ctx.textAlign = 'center';
     ctx.fillText('🔒', lockX + lockIconSize / 2, lockY + lockIconSize / 2 + 5);
 
-  }, [position, targetPosition, hp, cameraLocked, cameraOffset]);
+  }, [position, targetPosition, hp, cameraLocked, cameraOffset, projectiles]);
 
   return (
     <div style={{ 
@@ -414,6 +618,10 @@ const MobaCharacter = () => {
           HP: {Math.round(hp)} / {maxHp}
         </p>
         
+        <p style={{ margin: '5px 0', color: '#FF5722', fontWeight: 'bold' }}>
+          ⚡ Projectiles actifs: {projectiles.length}
+        </p>
+        
         <div style={{ marginTop: '15px' }}>
           <button 
             onClick={() => takeDamage(10)}
@@ -473,7 +681,10 @@ const MobaCharacter = () => {
           </button>
           
           <button 
-            onClick={() => setHp(maxHp)}
+            onClick={() => {
+              setHp(maxHp);
+              setProjectiles([]);
+            }}
             disabled={hp >= maxHp}
             style={{
               margin: '0 5px',
