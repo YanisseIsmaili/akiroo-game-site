@@ -14,6 +14,7 @@ const LoLDodgeTrainer = () => {
   const [skillshots, setSkillshots] = useState([]);
   const [score, setScore] = useState({ dodged: 0, hit: 0 });
   const [difficulty, setDifficulty] = useState('medium');
+  const [difficultyMultiplier, setDifficultyMultiplier] = useState(1);
   
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
@@ -140,7 +141,8 @@ const LoLDodgeTrainer = () => {
     switch(diff) {
       case 'easy': return 2500;
       case 'medium': return 1800;
-      case 'hard': return 1200;
+      case 'hard': return 800; // Beaucoup plus rapide !
+      case 'insane': return 400; // EXTRÊME !!!
       default: return 1800;
     }
   };
@@ -189,6 +191,9 @@ const LoLDodgeTrainer = () => {
     const availableSkillshots = getDifficultySkillshots(difficulty);
     const skillshotType = availableSkillshots[Math.floor(Math.random() * availableSkillshots.length)];
     
+    // En mode hard, augmenter la vitesse des projectiles
+    const speedMultiplier = difficulty === 'hard' ? 1.4 : difficulty === 'insane' ? 1.8 : 1;
+    
     // Spawn depuis un bord aléatoire
     const side = Math.floor(Math.random() * 4);
     let startX, startY;
@@ -200,9 +205,10 @@ const LoLDodgeTrainer = () => {
       case 3: startX = -50; startY = Math.random() * CANVAS_HEIGHT; break;
     }
 
-    // Viser vers le joueur avec de la prédiction
-    const predictedX = position.x + (Math.random() - 0.5) * 100;
-    const predictedY = position.y + (Math.random() - 0.5) * 100;
+    // Viser vers le joueur avec de la prédiction (meilleure en mode difficile)
+    const predictionRange = difficulty === 'hard' ? 50 : difficulty === 'insane' ? 20 : 100;
+    const predictedX = position.x + (Math.random() - 0.5) * predictionRange;
+    const predictedY = position.y + (Math.random() - 0.5) * predictionRange;
     const dx = predictedX - startX;
     const dy = predictedY - startY;
     const distance = Math.sqrt(dx * dx + dy * dy);
@@ -213,8 +219,8 @@ const LoLDodgeTrainer = () => {
       id: nextSkillshotId.current++,
       x: startX,
       y: startY,
-      vx: (dx / distance) * skillshotType.speed,
-      vy: (dy / distance) * skillshotType.speed,
+      vx: (dx / distance) * skillshotType.speed * speedMultiplier,
+      vy: (dy / distance) * skillshotType.speed * speedMultiplier,
       angle: angle,
       type: skillshotType,
       casting: true,
@@ -229,14 +235,16 @@ const LoLDodgeTrainer = () => {
     const regenInterval = setInterval(() => {
       setHp((currentHp) => {
         if (currentHp < maxHp && currentHp > 0) {
-          return Math.min(maxHp, currentHp + 0.3);
+          // Moins de regen en mode difficile
+          const regenAmount = difficulty === 'insane' ? 0.1 : difficulty === 'hard' ? 0.15 : 0.3;
+          return Math.min(maxHp, currentHp + regenAmount);
         }
         return currentHp;
       });
     }, 100);
 
     return () => clearInterval(regenInterval);
-  }, [maxHp]);
+  }, [maxHp, difficulty]);
 
   // Spawner des skillshots
   useEffect(() => {
@@ -332,7 +340,8 @@ const LoLDodgeTrainer = () => {
             
             if (distance < CHAMPION_HITBOX_RADIUS + shot.type.width) {
               // Touché !
-              setHp(prev => Math.max(0, prev - shot.type.damage));
+              const damageMultiplier = difficulty === 'insane' ? 1.5 : difficulty === 'hard' ? 1.3 : 1;
+              setHp(prev => Math.max(0, prev - (shot.type.damage * damageMultiplier)));
               setScore(prev => ({ ...prev, hit: prev.hit + 1 }));
               return false;
             }
@@ -570,9 +579,30 @@ const LoLDodgeTrainer = () => {
         fontSize: '16px'
       }}>
         Entraîne-toi à esquiver les skillshots les plus redoutés de LoL !
+        {difficulty === 'insane' && (
+          <span style={{ 
+            display: 'block', 
+            color: '#ff00ff', 
+            fontWeight: 'bold',
+            marginTop: '5px',
+            textShadow: '0 0 10px rgba(255, 0, 255, 0.8)'
+          }}>
+            ⚠️ MODE INSANE: Projectiles x1.8 plus rapides, spawn toutes les 0.4s, précision maximale !
+          </span>
+        )}
+        {difficulty === 'hard' && (
+          <span style={{ 
+            display: 'block', 
+            color: '#ff6666', 
+            fontWeight: 'bold',
+            marginTop: '5px'
+          }}>
+            ⚠️ MODE DIFFICILE: Projectiles x1.4 plus rapides, spawn toutes les 0.8s !
+          </span>
+        )}
       </p>
 
-      <div style={{ marginBottom: '15px', display: 'flex', gap: '10px' }}>
+      <div style={{ marginBottom: '15px', display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
         <button 
           onClick={() => setDifficulty('easy')}
           style={{
@@ -585,7 +615,7 @@ const LoLDodgeTrainer = () => {
             fontWeight: 'bold'
           }}
         >
-          Facile
+          😊 Facile
         </button>
         <button 
           onClick={() => setDifficulty('medium')}
@@ -599,7 +629,7 @@ const LoLDodgeTrainer = () => {
             fontWeight: 'bold'
           }}
         >
-          Moyen
+          😐 Moyen
         </button>
         <button 
           onClick={() => setDifficulty('hard')}
@@ -613,7 +643,23 @@ const LoLDodgeTrainer = () => {
             fontWeight: 'bold'
           }}
         >
-          Difficile
+          😰 Difficile
+        </button>
+        <button 
+          onClick={() => setDifficulty('insane')}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: difficulty === 'insane' ? '#8e44ad' : '#34495e',
+            color: '#f0e6d2',
+            border: difficulty === 'insane' ? '2px solid #ff00ff' : '2px solid #c8aa6e',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            boxShadow: difficulty === 'insane' ? '0 0 15px rgba(255, 0, 255, 0.5)' : 'none',
+            animation: difficulty === 'insane' ? 'pulse 1s infinite' : 'none'
+          }}
+        >
+          💀 INSANE
         </button>
       </div>
 
