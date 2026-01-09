@@ -6,11 +6,47 @@ const MobaCharacter = () => {
   const [hp, setHp] = useState(100);
   const [maxHp] = useState(100);
   const [isMouseDown, setIsMouseDown] = useState(false);
+  const [cameraLocked, setCameraLocked] = useState(true);
+  const [cameraOffset, setCameraOffset] = useState({ x: 0, y: 0 });
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
 
   const MOVE_SPEED = 200; // pixels par seconde
   const CHARACTER_SIZE = 30;
+  const CANVAS_WIDTH = 800;
+  const CANVAS_HEIGHT = 600;
+  const WORLD_WIDTH = 2000;
+  const WORLD_HEIGHT = 1500;
+
+  // Convertir les coordonnées écran en coordonnées monde
+  const screenToWorld = (screenX, screenY) => {
+    const offsetX = cameraLocked 
+      ? position.x - CANVAS_WIDTH / 2 
+      : cameraOffset.x;
+    const offsetY = cameraLocked 
+      ? position.y - CANVAS_HEIGHT / 2 
+      : cameraOffset.y;
+    
+    return {
+      x: screenX + offsetX,
+      y: screenY + offsetY
+    };
+  };
+
+  // Convertir les coordonnées monde en coordonnées écran
+  const worldToScreen = (worldX, worldY) => {
+    const offsetX = cameraLocked 
+      ? position.x - CANVAS_WIDTH / 2 
+      : cameraOffset.x;
+    const offsetY = cameraLocked 
+      ? position.y - CANVAS_HEIGHT / 2 
+      : cameraOffset.y;
+    
+    return {
+      x: worldX - offsetX,
+      y: worldY - offsetY
+    };
+  };
 
   // Fonction pour infliger des dégâts
   const takeDamage = (damage) => {
@@ -36,14 +72,33 @@ const MobaCharacter = () => {
     return () => clearInterval(regenInterval);
   }, [maxHp]);
 
+  // Gestion du clavier pour le camera lock
+  useEffect(() => {
+    const handleKeyPress = (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        toggleCameraLock();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, [cameraLocked, position]);
+
   // Gérer le clic sur le canvas
   const updateTargetPosition = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
     
-    setTargetPosition({ x, y });
+    const worldPos = screenToWorld(screenX, screenY);
+    
+    // Limiter la position dans les limites du monde
+    const clampedX = Math.max(CHARACTER_SIZE, Math.min(WORLD_WIDTH - CHARACTER_SIZE, worldPos.x));
+    const clampedY = Math.max(CHARACTER_SIZE, Math.min(WORLD_HEIGHT - CHARACTER_SIZE, worldPos.y));
+    
+    setTargetPosition({ x: clampedX, y: clampedY });
   };
 
   const handleMouseDown = (e) => {
@@ -63,6 +118,21 @@ const MobaCharacter = () => {
 
   const handleMouseLeave = () => {
     setIsMouseDown(false);
+  };
+
+  // Toggle camera lock
+  const toggleCameraLock = () => {
+    if (!cameraLocked) {
+      // Si on verrouille, on centre sur le personnage
+      setCameraLocked(true);
+    } else {
+      // Si on déverrouille, on garde l'offset actuel
+      setCameraOffset({
+        x: position.x - CANVAS_WIDTH / 2,
+        y: position.y - CANVAS_HEIGHT / 2
+      });
+      setCameraLocked(false);
+    }
   };
 
   // Animation du mouvement
@@ -90,9 +160,13 @@ const MobaCharacter = () => {
         const moveDistance = MOVE_SPEED * deltaTime;
         const ratio = Math.min(moveDistance / distance, 1);
 
+        const newX = currentPos.x + dx * ratio;
+        const newY = currentPos.y + dy * ratio;
+
+        // Limiter dans les bounds du monde
         return {
-          x: currentPos.x + dx * ratio,
-          y: currentPos.y + dy * ratio
+          x: Math.max(CHARACTER_SIZE, Math.min(WORLD_WIDTH - CHARACTER_SIZE, newX)),
+          y: Math.max(CHARACTER_SIZE, Math.min(WORLD_HEIGHT - CHARACTER_SIZE, newY))
         };
       });
 
@@ -113,24 +187,47 @@ const MobaCharacter = () => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
 
+    // Calculer l'offset de la caméra
+    const offsetX = cameraLocked 
+      ? position.x - CANVAS_WIDTH / 2 
+      : cameraOffset.x;
+    const offsetY = cameraLocked 
+      ? position.y - CANVAS_HEIGHT / 2 
+      : cameraOffset.y;
+
     // Effacer le canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Sauvegarder le contexte
+    ctx.save();
+
+    // Appliquer la transformation de la caméra
+    ctx.translate(-offsetX, -offsetY);
+
+    // Dessiner le fond du monde
+    ctx.fillStyle = '#e8f5e9';
+    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+
     // Dessiner la grille de fond
-    ctx.strokeStyle = '#e0e0e0';
+    ctx.strokeStyle = '#c8e6c9';
     ctx.lineWidth = 1;
-    for (let i = 0; i < canvas.width; i += 50) {
+    for (let i = 0; i < WORLD_WIDTH; i += 100) {
       ctx.beginPath();
       ctx.moveTo(i, 0);
-      ctx.lineTo(i, canvas.height);
+      ctx.lineTo(i, WORLD_HEIGHT);
       ctx.stroke();
     }
-    for (let i = 0; i < canvas.height; i += 50) {
+    for (let i = 0; i < WORLD_HEIGHT; i += 100) {
       ctx.beginPath();
       ctx.moveTo(0, i);
-      ctx.lineTo(canvas.width, i);
+      ctx.lineTo(WORLD_WIDTH, i);
       ctx.stroke();
     }
+
+    // Bordure du monde
+    ctx.strokeStyle = '#388e3c';
+    ctx.lineWidth = 4;
+    ctx.strokeRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
 
     // Dessiner la cible si elle existe
     if (targetPosition) {
@@ -226,7 +323,27 @@ const MobaCharacter = () => {
       ctx.fill();
     }
 
-  }, [position, targetPosition, hp]);
+    // Restaurer le contexte
+    ctx.restore();
+
+    // Dessiner l'indicateur de camera lock (en haut à droite, pas affecté par la caméra)
+    const lockIconSize = 30;
+    const lockX = CANVAS_WIDTH - lockIconSize - 10;
+    const lockY = 10;
+    
+    ctx.fillStyle = cameraLocked ? '#4CAF50' : '#9e9e9e';
+    ctx.fillRect(lockX, lockY, lockIconSize, lockIconSize);
+    
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(lockX, lockY, lockIconSize, lockIconSize);
+    
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('🔒', lockX + lockIconSize / 2, lockY + lockIconSize / 2 + 5);
+
+  }, [position, targetPosition, hp, cameraLocked, cameraOffset]);
 
   return (
     <div style={{ 
@@ -238,8 +355,30 @@ const MobaCharacter = () => {
     }}>
       <h2 style={{ marginBottom: '10px' }}>Déplacement style MOBA</h2>
       <p style={{ marginBottom: '20px', color: '#666' }}>
-        Clique ou maintiens le clic pour déplacer le personnage
+        Clique ou maintiens le clic pour déplacer le personnage - Espace pour lock/unlock la caméra
       </p>
+      
+      <div style={{ marginBottom: '10px' }}>
+        <button 
+          onClick={toggleCameraLock}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: cameraLocked ? '#4CAF50' : '#9e9e9e',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: 'bold',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            margin: '0 auto'
+          }}
+        >
+          🔒 Caméra: {cameraLocked ? 'VERROUILLÉE' : 'LIBRE'}
+        </button>
+      </div>
       
       <canvas
         ref={canvasRef}
