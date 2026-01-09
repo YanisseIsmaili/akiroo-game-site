@@ -1,181 +1,156 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const MobaCharacter = () => {
-  const [position, setPosition] = useState({ x: 400, y: 300 });
+// Simulateur d'entraînement League of Legends - Esquive de skillshots
+const LoLDodgeTrainer = () => {
+  // Hitbox d'un champion moyen LoL : 65 unités de rayon
+  // Convertir en pixels pour notre jeu (1 unité LoL ≈ 0.5 pixels)
+  const CHAMPION_HITBOX_RADIUS = 32.5; // 65 unités LoL * 0.5
+  
+  const [position, setPosition] = useState({ x: 1000, y: 750 });
   const [targetPosition, setTargetPosition] = useState(null);
+  const [isMouseDown, setIsMouseDown] = useState(false);
   const [hp, setHp] = useState(100);
   const [maxHp] = useState(100);
-  const [isMouseDown, setIsMouseDown] = useState(false);
-  const [cameraLocked, setCameraLocked] = useState(true);
-  const [cameraOffset, setCameraOffset] = useState({ x: 0, y: 0 });
-  const [projectiles, setProjectiles] = useState([]);
+  const [skillshots, setSkillshots] = useState([]);
+  const [score, setScore] = useState({ dodged: 0, hit: 0 });
+  const [difficulty, setDifficulty] = useState('medium');
+  
   const canvasRef = useRef(null);
   const animationRef = useRef(null);
-  const projectileAnimationRef = useRef(null);
-  const nextProjectileId = useRef(0);
+  const skillshotAnimationRef = useRef(null);
+  const nextSkillshotId = useRef(0);
 
-  const MOVE_SPEED = 200; // pixels par seconde
-  const CHARACTER_SIZE = 30;
-  const CANVAS_WIDTH = 800;
-  const CANVAS_HEIGHT = 600;
-  const WORLD_WIDTH = 2000;
-  const WORLD_HEIGHT = 1500;
+  const MOVE_SPEED = 325; // Vitesse de mouvement moyenne LoL
+  const CANVAS_WIDTH = 1200;
+  const CANVAS_HEIGHT = 800;
 
-  // Types de projectiles inspirés d'Ezreal
-  const PROJECTILE_TYPES = {
-    Q_MYSTIC_SHOT: {
-      width: 12, // 80 unités LoL converti pour notre jeu
-      speed: 300, // Rapide comme le Q d'Ezreal
+  // Skillshots réels de League of Legends avec statistiques précises
+  const SKILLSHOT_TYPES = {
+    // Hooks - Les plus craints
+    THRESH_HOOK: {
+      name: "Thresh Q (Death Sentence)",
+      width: 35, // 70 unités LoL
+      speed: 950, // 1900 vitesse LoL
+      damage: 20,
+      color: '#00ff88',
+      trail: '#004433',
+      castDelay: 500, // 0.5s cast time
+      difficulty: 'hard'
+    },
+    BLITZ_HOOK: {
+      name: "Blitzcrank Q (Rocket Grab)",
+      width: 35,
+      speed: 900,
+      damage: 20,
+      color: '#ffaa00',
+      trail: '#664400',
+      castDelay: 250,
+      difficulty: 'hard'
+    },
+    NAUTILUS_HOOK: {
+      name: "Nautilus Q (Dredge Line)",
+      width: 45, // Plus large
+      speed: 1050,
+      damage: 18,
+      color: '#2266ff',
+      trail: '#001144',
+      castDelay: 250,
+      difficulty: 'medium'
+    },
+    
+    // Snares/Bindings
+    MORGANA_Q: {
+      name: "Morgana Q (Dark Binding)",
+      width: 35, // 70 unités
+      speed: 600, // 1200 vitesse LoL - le plus lent
       damage: 15,
-      color: '#FFD700', // Doré
-      name: 'Mystic Shot'
+      color: '#9933ff',
+      trail: '#330066',
+      castDelay: 250,
+      difficulty: 'easy' // Lent mais large
     },
-    W_ESSENCE_FLUX: {
-      width: 10, // Un peu plus fin
-      speed: 250, // Moyennement rapide
+    LUX_Q: {
+      name: "Lux Q (Light Binding)",
+      width: 35,
+      speed: 600,
+      damage: 15,
+      color: '#ffff66',
+      trail: '#666633',
+      castDelay: 250,
+      difficulty: 'easy'
+    },
+    
+    // Dégâts skillshots
+    EZREAL_Q: {
+      name: "Ezreal Q (Mystic Shot)",
+      width: 40, // 80 unités (réduit de 120)
+      speed: 1000, // 2000 vitesse LoL
       damage: 12,
-      color: '#00CED1', // Cyan
-      name: 'Essence Flux'
+      color: '#ffdd00',
+      trail: '#664400',
+      castDelay: 250,
+      difficulty: 'medium'
     },
-    R_TRUESHOT: {
-      width: 25, // Large comme l'ulti d'Ezreal
-      speed: 200, // Plus lent mais plus gros
-      damage: 30,
-      color: '#FF4500', // Orange-Rouge
-      name: 'Trueshot Barrage'
+    NIDALEE_Q: {
+      name: "Nidalee Q (Javelin Toss)",
+      width: 20, // Très fin
+      speed: 650, // 1300 vitesse LoL
+      damage: 25,
+      color: '#ff6600',
+      trail: '#662200',
+      castDelay: 250,
+      difficulty: 'medium' // Fin mais rapide
+    },
+    
+    // AOE Skillshots
+    XERATH_E: {
+      name: "Xerath E (Shocking Orb)",
+      width: 30,
+      speed: 700,
+      damage: 18,
+      color: '#00ccff',
+      trail: '#004466',
+      castDelay: 500,
+      difficulty: 'medium'
+    },
+    VELKOZ_Q: {
+      name: "Vel'Koz Q (Plasma Fission)",
+      width: 25,
+      speed: 650,
+      damage: 15,
+      color: '#ff00ff',
+      trail: '#660066',
+      castDelay: 250,
+      difficulty: 'hard' // Peut split
     }
   };
 
-  // Convertir les coordonnées écran en coordonnées monde
+  const getDifficultySkillshots = (diff) => {
+    const types = Object.values(SKILLSHOT_TYPES);
+    if (diff === 'easy') {
+      return types.filter(s => s.difficulty === 'easy' || s.difficulty === 'medium');
+    } else if (diff === 'medium') {
+      return types.filter(s => s.difficulty !== 'hard');
+    } else {
+      return types; // All skillshots
+    }
+  };
+
+  const getSpawnRate = (diff) => {
+    switch(diff) {
+      case 'easy': return 2500;
+      case 'medium': return 1800;
+      case 'hard': return 1200;
+      default: return 1800;
+    }
+  };
+
+  // Convertir coordonnées écran -> monde
   const screenToWorld = (screenX, screenY) => {
-    const offsetX = cameraLocked 
-      ? position.x - CANVAS_WIDTH / 2 
-      : cameraOffset.x;
-    const offsetY = cameraLocked 
-      ? position.y - CANVAS_HEIGHT / 2 
-      : cameraOffset.y;
-    
-    return {
-      x: screenX + offsetX,
-      y: screenY + offsetY
-    };
+    return { x: screenX, y: screenY };
   };
 
-  // Convertir les coordonnées monde en coordonnées écran
-  const worldToScreen = (worldX, worldY) => {
-    const offsetX = cameraLocked 
-      ? position.x - CANVAS_WIDTH / 2 
-      : cameraOffset.x;
-    const offsetY = cameraLocked 
-      ? position.y - CANVAS_HEIGHT / 2 
-      : cameraOffset.y;
-    
-    return {
-      x: worldX - offsetX,
-      y: worldY - offsetY
-    };
-  };
-
-  // Fonction pour infliger des dégâts
-  const takeDamage = (damage) => {
-    setHp((currentHp) => Math.max(0, currentHp - damage));
-  };
-
-  // Fonction pour soigner
-  const heal = (amount) => {
-    setHp((currentHp) => Math.min(maxHp, currentHp + amount));
-  };
-
-  // Régénération automatique
-  useEffect(() => {
-    const regenInterval = setInterval(() => {
-      setHp((currentHp) => {
-        if (currentHp < maxHp && currentHp > 0) {
-          return Math.min(maxHp, currentHp + 0.5);
-        }
-        return currentHp;
-      });
-    }, 100);
-
-    return () => clearInterval(regenInterval);
-  }, [maxHp]);
-
-  // Gestion du clavier pour le camera lock
-  useEffect(() => {
-    const handleKeyPress = (e) => {
-      if (e.code === 'Space') {
-        e.preventDefault();
-        toggleCameraLock();
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [cameraLocked, position]);
-
-  // Spawner des projectiles régulièrement
-  useEffect(() => {
-    const spawnInterval = setInterval(() => {
-      if (hp > 0) { // Ne pas spawner si le personnage est mort
-        spawnProjectile();
-      }
-    }, 1500); // Un projectile toutes les 1.5 secondes
-
-    return () => clearInterval(spawnInterval);
-  }, [position, hp]);
-
-  // Animation des projectiles
-  useEffect(() => {
-    let lastTime = performance.now();
-
-    const animateProjectiles = (currentTime) => {
-      const deltaTime = (currentTime - lastTime) / 1000;
-      lastTime = currentTime;
-
-      setProjectiles(prevProjectiles => {
-        const updatedProjectiles = prevProjectiles
-          .map(proj => ({
-            ...proj,
-            x: proj.x + proj.vx * deltaTime,
-            y: proj.y + proj.vy * deltaTime
-          }))
-          .filter(proj => {
-            // Vérifier collision avec le personnage (utilise la largeur du projectile)
-            const dx = proj.x - position.x;
-            const dy = proj.y - position.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            
-            if (distance < CHARACTER_SIZE / 2 + proj.type.width) {
-              // Collision ! Infliger des dégâts selon le type de projectile
-              takeDamage(proj.type.damage);
-              return false; // Retirer le projectile
-            }
-
-            // Retirer les projectiles hors du monde
-            if (proj.x < -100 || proj.x > WORLD_WIDTH + 100 || 
-                proj.y < -100 || proj.y > WORLD_HEIGHT + 100) {
-              return false;
-            }
-
-            return true;
-          });
-
-        return updatedProjectiles;
-      });
-
-      projectileAnimationRef.current = requestAnimationFrame(animateProjectiles);
-    };
-
-    projectileAnimationRef.current = requestAnimationFrame(animateProjectiles);
-
-    return () => {
-      if (projectileAnimationRef.current) {
-        cancelAnimationFrame(projectileAnimationRef.current);
-      }
-    };
-  }, [position]);
-
-  // Gérer le clic sur le canvas
+  // Gestion du mouvement
   const updateTargetPosition = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
@@ -184,9 +159,8 @@ const MobaCharacter = () => {
     
     const worldPos = screenToWorld(screenX, screenY);
     
-    // Limiter la position dans les limites du monde
-    const clampedX = Math.max(CHARACTER_SIZE, Math.min(WORLD_WIDTH - CHARACTER_SIZE, worldPos.x));
-    const clampedY = Math.max(CHARACTER_SIZE, Math.min(WORLD_HEIGHT - CHARACTER_SIZE, worldPos.y));
+    const clampedX = Math.max(CHAMPION_HITBOX_RADIUS, Math.min(CANVAS_WIDTH - CHAMPION_HITBOX_RADIUS, worldPos.x));
+    const clampedY = Math.max(CHAMPION_HITBOX_RADIUS, Math.min(CANVAS_HEIGHT - CHAMPION_HITBOX_RADIUS, worldPos.y));
     
     setTargetPosition({ x: clampedX, y: clampedY });
   };
@@ -210,77 +184,79 @@ const MobaCharacter = () => {
     setIsMouseDown(false);
   };
 
-  // Toggle camera lock
-  const toggleCameraLock = () => {
-    if (!cameraLocked) {
-      // Si on verrouille, on centre sur le personnage
-      setCameraLocked(true);
-    } else {
-      // Si on déverrouille, on garde l'offset actuel
-      setCameraOffset({
-        x: position.x - CANVAS_WIDTH / 2,
-        y: position.y - CANVAS_HEIGHT / 2
-      });
-      setCameraLocked(false);
-    }
-  };
-
-  // Créer un projectile depuis un bord aléatoire
-  const spawnProjectile = () => {
-    const side = Math.floor(Math.random() * 4); // 0: haut, 1: droite, 2: bas, 3: gauche
+  // Fonction pour spawn des skillshots réalistes
+  const spawnSkillshot = () => {
+    const availableSkillshots = getDifficultySkillshots(difficulty);
+    const skillshotType = availableSkillshots[Math.floor(Math.random() * availableSkillshots.length)];
+    
+    // Spawn depuis un bord aléatoire
+    const side = Math.floor(Math.random() * 4);
     let startX, startY;
     
     switch(side) {
-      case 0: // Haut
-        startX = Math.random() * WORLD_WIDTH;
-        startY = 0;
-        break;
-      case 1: // Droite
-        startX = WORLD_WIDTH;
-        startY = Math.random() * WORLD_HEIGHT;
-        break;
-      case 2: // Bas
-        startX = Math.random() * WORLD_WIDTH;
-        startY = WORLD_HEIGHT;
-        break;
-      case 3: // Gauche
-        startX = 0;
-        startY = Math.random() * WORLD_HEIGHT;
-        break;
+      case 0: startX = Math.random() * CANVAS_WIDTH; startY = -50; break;
+      case 1: startX = CANVAS_WIDTH + 50; startY = Math.random() * CANVAS_HEIGHT; break;
+      case 2: startX = Math.random() * CANVAS_WIDTH; startY = CANVAS_HEIGHT + 50; break;
+      case 3: startX = -50; startY = Math.random() * CANVAS_HEIGHT; break;
     }
 
-    // Choisir un type de projectile aléatoire
-    const types = Object.values(PROJECTILE_TYPES);
-    const projectileType = types[Math.floor(Math.random() * types.length)];
-
-    // Calculer la direction vers le personnage avec un peu d'aléatoire
-    const targetX = position.x + (Math.random() - 0.5) * 200;
-    const targetY = position.y + (Math.random() - 0.5) * 200;
-    const dx = targetX - startX;
-    const dy = targetY - startY;
+    // Viser vers le joueur avec de la prédiction
+    const predictedX = position.x + (Math.random() - 0.5) * 100;
+    const predictedY = position.y + (Math.random() - 0.5) * 100;
+    const dx = predictedX - startX;
+    const dy = predictedY - startY;
     const distance = Math.sqrt(dx * dx + dy * dy);
 
-    const newProjectile = {
-      id: nextProjectileId.current++,
+    const angle = Math.atan2(dy, dx);
+
+    const newSkillshot = {
+      id: nextSkillshotId.current++,
       x: startX,
       y: startY,
-      vx: (dx / distance) * projectileType.speed,
-      vy: (dy / distance) * projectileType.speed,
-      type: projectileType,
-      angle: Math.atan2(dy, dx)
+      vx: (dx / distance) * skillshotType.speed,
+      vy: (dy / distance) * skillshotType.speed,
+      angle: angle,
+      type: skillshotType,
+      casting: true,
+      castStartTime: performance.now()
     };
 
-    setProjectiles(prev => [...prev, newProjectile]);
+    setSkillshots(prev => [...prev, newSkillshot]);
   };
 
-  // Animation du mouvement
+  // Régénération HP
+  useEffect(() => {
+    const regenInterval = setInterval(() => {
+      setHp((currentHp) => {
+        if (currentHp < maxHp && currentHp > 0) {
+          return Math.min(maxHp, currentHp + 0.3);
+        }
+        return currentHp;
+      });
+    }, 100);
+
+    return () => clearInterval(regenInterval);
+  }, [maxHp]);
+
+  // Spawner des skillshots
+  useEffect(() => {
+    if (hp <= 0) return;
+    
+    const spawnInterval = setInterval(() => {
+      spawnSkillshot();
+    }, getSpawnRate(difficulty));
+
+    return () => clearInterval(spawnInterval);
+  }, [position, hp, difficulty]);
+
+  // Animation du mouvement du personnage
   useEffect(() => {
     if (!targetPosition) return;
 
     let lastTime = performance.now();
 
     const animate = (currentTime) => {
-      const deltaTime = (currentTime - lastTime) / 1000; // en secondes
+      const deltaTime = (currentTime - lastTime) / 1000;
       lastTime = currentTime;
 
       setPosition((currentPos) => {
@@ -288,23 +264,20 @@ const MobaCharacter = () => {
         const dy = targetPosition.y - currentPos.y;
         const distance = Math.sqrt(dx * dx + dy * dy);
 
-        // Si on est arrivé à destination
         if (distance < 5) {
           setTargetPosition(null);
           return currentPos;
         }
 
-        // Calculer le mouvement
         const moveDistance = MOVE_SPEED * deltaTime;
         const ratio = Math.min(moveDistance / distance, 1);
 
         const newX = currentPos.x + dx * ratio;
         const newY = currentPos.y + dy * ratio;
 
-        // Limiter dans les bounds du monde
         return {
-          x: Math.max(CHARACTER_SIZE, Math.min(WORLD_WIDTH - CHARACTER_SIZE, newX)),
-          y: Math.max(CHARACTER_SIZE, Math.min(WORLD_HEIGHT - CHARACTER_SIZE, newY))
+          x: Math.max(CHAMPION_HITBOX_RADIUS, Math.min(CANVAS_WIDTH - CHAMPION_HITBOX_RADIUS, newX)),
+          y: Math.max(CHAMPION_HITBOX_RADIUS, Math.min(CANVAS_HEIGHT - CHAMPION_HITBOX_RADIUS, newY))
         };
       });
 
@@ -320,234 +293,257 @@ const MobaCharacter = () => {
     };
   }, [targetPosition]);
 
-  // Dessiner sur le canvas
+  // Animation des skillshots
+  useEffect(() => {
+    let lastTime = performance.now();
+
+    const animateSkillshots = (currentTime) => {
+      const deltaTime = (currentTime - lastTime) / 1000;
+      lastTime = currentTime;
+
+      setSkillshots(prevSkillshots => {
+        return prevSkillshots
+          .map(shot => {
+            // Vérifier si le cast time est écoulé
+            if (shot.casting) {
+              const timeSinceCast = currentTime - shot.castStartTime;
+              if (timeSinceCast < shot.type.castDelay) {
+                return shot; // Toujours en cast
+              } else {
+                return { ...shot, casting: false }; // Cast terminé
+              }
+            }
+
+            // Déplacer le skillshot
+            return {
+              ...shot,
+              x: shot.x + shot.vx * deltaTime,
+              y: shot.y + shot.vy * deltaTime
+            };
+          })
+          .filter(shot => {
+            // Ne pas vérifier les collisions pendant le cast
+            if (shot.casting) return true;
+
+            // Vérifier collision avec le champion
+            const dx = shot.x - position.x;
+            const dy = shot.y - position.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < CHAMPION_HITBOX_RADIUS + shot.type.width) {
+              // Touché !
+              setHp(prev => Math.max(0, prev - shot.type.damage));
+              setScore(prev => ({ ...prev, hit: prev.hit + 1 }));
+              return false;
+            }
+
+            // Retirer les skillshots hors de l'écran
+            if (shot.x < -200 || shot.x > CANVAS_WIDTH + 200 || 
+                shot.y < -200 || shot.y > CANVAS_HEIGHT + 200) {
+              // Esquivé !
+              if (!shot.counted) {
+                setScore(prev => ({ ...prev, dodged: prev.dodged + 1 }));
+                shot.counted = true;
+              }
+              return false;
+            }
+
+            return true;
+          });
+      });
+
+      skillshotAnimationRef.current = requestAnimationFrame(animateSkillshots);
+    };
+
+    skillshotAnimationRef.current = requestAnimationFrame(animateSkillshots);
+
+    return () => {
+      if (skillshotAnimationRef.current) {
+        cancelAnimationFrame(skillshotAnimationRef.current);
+      }
+    };
+  }, [position]);
+
+  // Rendu du canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
 
-    // Calculer l'offset de la caméra
-    const offsetX = cameraLocked 
-      ? position.x - CANVAS_WIDTH / 2 
-      : cameraOffset.x;
-    const offsetY = cameraLocked 
-      ? position.y - CANVAS_HEIGHT / 2 
-      : cameraOffset.y;
-
-    // Effacer le canvas
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Sauvegarder le contexte
-    ctx.save();
+    // Fond style Summoner's Rift
+    const gradient = ctx.createLinearGradient(0, 0, 0, CANVAS_HEIGHT);
+    gradient.addColorStop(0, '#0a3d2e');
+    gradient.addColorStop(1, '#1a5d4e');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
 
-    // Appliquer la transformation de la caméra
-    ctx.translate(-offsetX, -offsetY);
-
-    // Dessiner le fond du monde
-    ctx.fillStyle = '#e8f5e9';
-    ctx.fillRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-
-    // Dessiner la grille de fond
-    ctx.strokeStyle = '#c8e6c9';
+    // Grille
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
     ctx.lineWidth = 1;
-    for (let i = 0; i < WORLD_WIDTH; i += 100) {
+    for (let i = 0; i < CANVAS_WIDTH; i += 50) {
       ctx.beginPath();
       ctx.moveTo(i, 0);
-      ctx.lineTo(i, WORLD_HEIGHT);
+      ctx.lineTo(i, CANVAS_HEIGHT);
       ctx.stroke();
     }
-    for (let i = 0; i < WORLD_HEIGHT; i += 100) {
+    for (let i = 0; i < CANVAS_HEIGHT; i += 50) {
       ctx.beginPath();
       ctx.moveTo(0, i);
-      ctx.lineTo(WORLD_WIDTH, i);
+      ctx.lineTo(CANVAS_WIDTH, i);
       ctx.stroke();
     }
 
-    // Bordure du monde
-    ctx.strokeStyle = '#388e3c';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    // Dessiner les skillshots
+    skillshots.forEach(shot => {
+      if (shot.casting) {
+        // Indicateur de cast avec nom du sort
+        const alpha = Math.sin(performance.now() / 100) * 0.3 + 0.5;
+        
+        // Cercle de warning
+        ctx.strokeStyle = shot.type.color;
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        ctx.arc(shot.x, shot.y, 30, 0, Math.PI * 2);
+        ctx.stroke();
+        
+        // Cercle extérieur
+        ctx.beginPath();
+        ctx.arc(shot.x, shot.y, 40, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        
+        // Nom du sort qui va être lancé
+        ctx.fillStyle = shot.type.color;
+        ctx.font = 'bold 14px Arial';
+        ctx.textAlign = 'center';
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+        ctx.shadowBlur = 4;
+        ctx.fillText(shot.type.name.split(' ')[0], shot.x, shot.y - 50); // Nom du champion
+        ctx.fillText(shot.type.name.split(' ')[1], shot.x, shot.y - 35); // Lettre de la compétence
+        ctx.shadowBlur = 0;
+        
+        return;
+      }
 
-    // Dessiner la cible si elle existe
-    if (targetPosition) {
-      ctx.strokeStyle = '#4CAF50';
+      ctx.save();
+      ctx.translate(shot.x, shot.y);
+      ctx.rotate(shot.angle);
+
+      // Traînée
+      const trailGradient = ctx.createLinearGradient(-shot.type.width * 4, 0, 0, 0);
+      trailGradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      trailGradient.addColorStop(1, shot.type.trail);
+      ctx.fillStyle = trailGradient;
+      ctx.fillRect(-shot.type.width * 4, -shot.type.width / 2, shot.type.width * 4, shot.type.width);
+
+      // Corps du projectile
+      const projGradient = ctx.createLinearGradient(-shot.type.width, 0, shot.type.width, 0);
+      projGradient.addColorStop(0, shot.type.trail);
+      projGradient.addColorStop(0.5, shot.type.color);
+      projGradient.addColorStop(1, shot.type.trail);
+      
+      ctx.fillStyle = projGradient;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, shot.type.width * 1.5, shot.type.width, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Bordure lumineuse
+      ctx.strokeStyle = '#fff';
       ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(targetPosition.x, targetPosition.y, 15, 0, Math.PI * 2);
+      ctx.globalAlpha = 0.6;
       ctx.stroke();
-      
-      ctx.beginPath();
-      ctx.moveTo(targetPosition.x - 20, targetPosition.y);
-      ctx.lineTo(targetPosition.x + 20, targetPosition.y);
-      ctx.stroke();
-      
-      ctx.beginPath();
-      ctx.moveTo(targetPosition.x, targetPosition.y - 20);
-      ctx.lineTo(targetPosition.x, targetPosition.y + 20);
-      ctx.stroke();
+      ctx.globalAlpha = 1;
 
-      // Ligne vers la cible
-      ctx.strokeStyle = '#4CAF50';
-      ctx.lineWidth = 1;
+      ctx.restore();
+      
+      // Nom du sort au-dessus du projectile (une fois lancé)
+      ctx.fillStyle = shot.type.color;
+      ctx.font = 'bold 12px Arial';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+      ctx.shadowBlur = 5;
+      
+      // Extraire juste le nom du champion et la lettre
+      const championName = shot.type.name.split(' ')[0]; // Ex: "Thresh"
+      const ability = shot.type.name.split(' ')[1]; // Ex: "Q"
+      
+      ctx.fillText(`${championName} ${ability}`, shot.x, shot.y - shot.type.width - 10);
+      ctx.shadowBlur = 0;
+    });
+
+    // Dessiner le champion (cercle avec hitbox visible)
+    // Hitbox (cercle rouge semi-transparent)
+    ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(position.x, position.y, CHAMPION_HITBOX_RADIUS, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Champion
+    ctx.fillStyle = '#3498db';
+    ctx.beginPath();
+    ctx.arc(position.x, position.y, CHAMPION_HITBOX_RADIUS * 0.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Bordure
+    ctx.strokeStyle = '#2980b9';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Ombre
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.ellipse(position.x, position.y + CHAMPION_HITBOX_RADIUS, CHAMPION_HITBOX_RADIUS * 0.8, CHAMPION_HITBOX_RADIUS * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Barre de vie
+    const hpBarWidth = 60;
+    const hpBarHeight = 8;
+    const hpBarX = position.x - hpBarWidth / 2;
+    const hpBarY = position.y - CHAMPION_HITBOX_RADIUS - 15;
+
+    ctx.fillStyle = '#2c3e50';
+    ctx.fillRect(hpBarX, hpBarY, hpBarWidth, hpBarHeight);
+
+    const hpPercentage = hp / maxHp;
+    ctx.fillStyle = hpPercentage > 0.5 ? '#27ae60' : hpPercentage > 0.25 ? '#f39c12' : '#e74c3c';
+    ctx.fillRect(hpBarX, hpBarY, hpBarWidth * hpPercentage, hpBarHeight);
+
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(hpBarX, hpBarY, hpBarWidth, hpBarHeight);
+
+    // Indicateur de cible
+    if (targetPosition) {
+      ctx.strokeStyle = '#2ecc71';
+      ctx.lineWidth = 2;
       ctx.setLineDash([5, 5]);
       ctx.beginPath();
       ctx.moveTo(position.x, position.y);
       ctx.lineTo(targetPosition.x, targetPosition.y);
       ctx.stroke();
       ctx.setLineDash([]);
-    }
 
-    // Dessiner le personnage (cercle bleu)
-    ctx.fillStyle = '#2196F3';
-    ctx.beginPath();
-    ctx.arc(position.x, position.y, CHARACTER_SIZE / 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Ombre du personnage
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
-    ctx.beginPath();
-    ctx.ellipse(position.x, position.y + CHARACTER_SIZE / 2 + 5, CHARACTER_SIZE / 2, CHARACTER_SIZE / 4, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Barre de vie
-    const healthBarWidth = 40;
-    const healthBarHeight = 6;
-    const healthBarX = position.x - healthBarWidth / 2;
-    const healthBarY = position.y - CHARACTER_SIZE - 10;
-
-    // Fond de la barre de vie (rouge)
-    ctx.fillStyle = '#d32f2f';
-    ctx.fillRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
-
-    // Barre de vie actuelle (verte/orange/rouge selon HP)
-    const hpPercentage = hp / maxHp;
-    let healthColor;
-    if (hpPercentage > 0.6) {
-      healthColor = '#4CAF50';
-    } else if (hpPercentage > 0.3) {
-      healthColor = '#FF9800';
-    } else {
-      healthColor = '#f44336';
-    }
-    
-    ctx.fillStyle = healthColor;
-    ctx.fillRect(healthBarX, healthBarY, healthBarWidth * hpPercentage, healthBarHeight);
-
-    // Bordure de la barre de vie
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
-
-    // Texte HP
-    ctx.fillStyle = '#000';
-    ctx.font = 'bold 10px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(`${Math.round(hp)}/${maxHp}`, position.x, healthBarY - 2);
-
-    // Direction du personnage
-    if (targetPosition) {
-      const dx = targetPosition.x - position.x;
-      const dy = targetPosition.y - position.y;
-      const angle = Math.atan2(dy, dx);
-      
-      ctx.fillStyle = '#ffffff';
       ctx.beginPath();
-      ctx.arc(
-        position.x + Math.cos(angle) * 8,
-        position.y + Math.sin(angle) * 8,
-        4,
-        0,
-        Math.PI * 2
-      );
-      ctx.fill();
-    }
-
-    // Dessiner les projectiles
-    projectiles.forEach(proj => {
-      const projWidth = proj.type.width;
-      
-      // Dessiner le projectile comme un rectangle arrondi orienté
-      ctx.save();
-      ctx.translate(proj.x, proj.y);
-      ctx.rotate(proj.angle);
-
-      // Ombre du projectile
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-      ctx.beginPath();
-      ctx.ellipse(2, 2, projWidth + 2, projWidth / 2 + 1, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Corps principal du projectile (ovale allongé)
-      const gradient = ctx.createLinearGradient(-projWidth * 2, 0, projWidth * 2, 0);
-      gradient.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
-      gradient.addColorStop(0.5, proj.type.color);
-      gradient.addColorStop(1, 'rgba(0, 0, 0, 0.3)');
-      
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.ellipse(0, 0, projWidth * 1.5, projWidth / 1.5, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Bordure brillante
-      ctx.strokeStyle = '#fff';
-      ctx.lineWidth = 1.5;
-      ctx.globalAlpha = 0.7;
+      ctx.arc(targetPosition.x, targetPosition.y, 10, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.globalAlpha = 1;
+    }
 
-      // Point central lumineux
-      ctx.fillStyle = '#fff';
-      ctx.beginPath();
-      ctx.arc(0, 0, projWidth / 3, 0, Math.PI * 2);
-      ctx.fill();
+  }, [position, targetPosition, hp, skillshots]);
 
-      ctx.restore();
+  const resetGame = () => {
+    setHp(maxHp);
+    setSkillshots([]);
+    setScore({ dodged: 0, hit: 0 });
+    setPosition({ x: 1000, y: 750 });
+    setTargetPosition(null);
+  };
 
-      // Traînée du projectile
-      const trailLength = projWidth * 3;
-      const trailAngle = Math.atan2(proj.vy, proj.vx);
-      
-      const trailGradient = ctx.createLinearGradient(
-        proj.x, proj.y,
-        proj.x - Math.cos(trailAngle) * trailLength,
-        proj.y - Math.sin(trailAngle) * trailLength
-      );
-      trailGradient.addColorStop(0, proj.type.color);
-      trailGradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-      
-      ctx.strokeStyle = trailGradient;
-      ctx.lineWidth = projWidth / 2;
-      ctx.globalAlpha = 0.6;
-      ctx.beginPath();
-      ctx.moveTo(proj.x, proj.y);
-      ctx.lineTo(
-        proj.x - Math.cos(trailAngle) * trailLength,
-        proj.y - Math.sin(trailAngle) * trailLength
-      );
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-    });
-
-    // Restaurer le contexte
-    ctx.restore();
-
-    // Dessiner l'indicateur de camera lock (en haut à droite, pas affecté par la caméra)
-    const lockIconSize = 30;
-    const lockX = CANVAS_WIDTH - lockIconSize - 10;
-    const lockY = 10;
-    
-    ctx.fillStyle = cameraLocked ? '#4CAF50' : '#9e9e9e';
-    ctx.fillRect(lockX, lockY, lockIconSize, lockIconSize);
-    
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(lockX, lockY, lockIconSize, lockIconSize);
-    
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 12px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText('🔒', lockX + lockIconSize / 2, lockY + lockIconSize / 2 + 5);
-
-  }, [position, targetPosition, hp, cameraLocked, cameraOffset, projectiles]);
+  const dodgeRate = score.dodged + score.hit > 0 
+    ? ((score.dodged / (score.dodged + score.hit)) * 100).toFixed(1)
+    : 0;
 
   return (
     <div style={{ 
@@ -555,167 +551,227 @@ const MobaCharacter = () => {
       flexDirection: 'column', 
       alignItems: 'center', 
       padding: '20px',
-      fontFamily: 'Arial, sans-serif'
+      fontFamily: '"Beaufort for LOL", Arial, sans-serif',
+      background: 'linear-gradient(135deg, #0a1428 0%, #1e3a5f 100%)',
+      minHeight: '100vh'
     }}>
-      <h2 style={{ marginBottom: '10px' }}>Déplacement style MOBA</h2>
-      <p style={{ marginBottom: '20px', color: '#666' }}>
-        Clique ou maintiens le clic pour déplacer le personnage - Espace pour lock/unlock la caméra
-      </p>
+      <h1 style={{ 
+        color: '#f0e6d2',
+        marginBottom: '10px',
+        fontSize: '36px',
+        textShadow: '2px 2px 4px rgba(0,0,0,0.5)'
+      }}>
+        League of Legends - Dodge Trainer
+      </h1>
       
-      <div style={{ marginBottom: '10px' }}>
+      <p style={{ 
+        color: '#c8aa6e',
+        marginBottom: '20px',
+        fontSize: '16px'
+      }}>
+        Entraîne-toi à esquiver les skillshots les plus redoutés de LoL !
+      </p>
+
+      <div style={{ marginBottom: '15px', display: 'flex', gap: '10px' }}>
         <button 
-          onClick={toggleCameraLock}
+          onClick={() => setDifficulty('easy')}
           style={{
             padding: '10px 20px',
-            backgroundColor: cameraLocked ? '#4CAF50' : '#9e9e9e',
-            color: 'white',
-            border: 'none',
+            backgroundColor: difficulty === 'easy' ? '#27ae60' : '#34495e',
+            color: '#f0e6d2',
+            border: '2px solid #c8aa6e',
             borderRadius: '4px',
             cursor: 'pointer',
-            fontSize: '14px',
-            fontWeight: 'bold',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            margin: '0 auto'
+            fontWeight: 'bold'
           }}
         >
-          🔒 Caméra: {cameraLocked ? 'VERROUILLÉE' : 'LIBRE'}
+          Facile
+        </button>
+        <button 
+          onClick={() => setDifficulty('medium')}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: difficulty === 'medium' ? '#f39c12' : '#34495e',
+            color: '#f0e6d2',
+            border: '2px solid #c8aa6e',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 'bold'
+          }}
+        >
+          Moyen
+        </button>
+        <button 
+          onClick={() => setDifficulty('hard')}
+          style={{
+            padding: '10px 20px',
+            backgroundColor: difficulty === 'hard' ? '#e74c3c' : '#34495e',
+            color: '#f0e6d2',
+            border: '2px solid #c8aa6e',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontWeight: 'bold'
+          }}
+        >
+          Difficile
         </button>
       </div>
-      
+
       <canvas
         ref={canvasRef}
-        width={800}
-        height={600}
+        width={CANVAS_WIDTH}
+        height={CANVAS_HEIGHT}
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
         onMouseMove={handleMouseMove}
         onMouseLeave={handleMouseLeave}
         style={{
-          border: '2px solid #333',
+          border: '4px solid #c8aa6e',
           cursor: 'pointer',
-          backgroundColor: '#f5f5f5',
-          borderRadius: '4px'
+          borderRadius: '8px',
+          boxShadow: '0 0 20px rgba(200, 170, 110, 0.3)'
         }}
       />
-      
-      <div style={{ marginTop: '20px', textAlign: 'center' }}>
-        <p style={{ margin: '5px 0' }}>
-          Position: X: {Math.round(position.x)}, Y: {Math.round(position.y)}
-        </p>
-        {targetPosition && (
-          <p style={{ margin: '5px 0', color: '#4CAF50' }}>
-            Cible: X: {Math.round(targetPosition.x)}, Y: {Math.round(targetPosition.y)}
-          </p>
-        )}
+
+      <div style={{ 
+        marginTop: '20px', 
+        textAlign: 'center',
+        background: 'rgba(0, 0, 0, 0.5)',
+        padding: '20px',
+        borderRadius: '8px',
+        border: '2px solid #c8aa6e'
+      }}>
+        <div style={{ display: 'flex', gap: '40px', justifyContent: 'center', marginBottom: '15px' }}>
+          <div>
+            <p style={{ color: '#27ae60', fontSize: '18px', fontWeight: 'bold', margin: '5px 0' }}>
+              ✓ Esquivés: {score.dodged}
+            </p>
+          </div>
+          <div>
+            <p style={{ color: '#e74c3c', fontSize: '18px', fontWeight: 'bold', margin: '5px 0' }}>
+              ✗ Touchés: {score.hit}
+            </p>
+          </div>
+          <div>
+            <p style={{ color: '#f39c12', fontSize: '18px', fontWeight: 'bold', margin: '5px 0' }}>
+              Taux: {dodgeRate}%
+            </p>
+          </div>
+        </div>
+
         <p style={{ 
-          margin: '10px 0', 
-          fontSize: '18px', 
+          color: hp > 60 ? '#27ae60' : hp > 30 ? '#f39c12' : '#e74c3c',
+          fontSize: '20px',
           fontWeight: 'bold',
-          color: hp > 60 ? '#4CAF50' : hp > 30 ? '#FF9800' : '#f44336'
+          margin: '10px 0'
         }}>
           HP: {Math.round(hp)} / {maxHp}
         </p>
-        
-        <p style={{ margin: '5px 0', color: '#FF5722', fontWeight: 'bold' }}>
-          ⚡ Projectiles actifs: {projectiles.length}
+
+        <p style={{ color: '#c8aa6e', fontSize: '14px', margin: '10px 0' }}>
+          Hitbox: 65 unités (standard LoL) • Vitesse: 325
         </p>
-        
-        <div style={{ marginTop: '15px' }}>
-          <button 
-            onClick={() => takeDamage(10)}
-            disabled={hp <= 0}
-            style={{
-              margin: '0 5px',
-              padding: '10px 20px',
-              backgroundColor: '#f44336',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: hp <= 0 ? 'not-allowed' : 'pointer',
-              fontSize: '14px',
-              fontWeight: 'bold',
-              opacity: hp <= 0 ? 0.5 : 1
-            }}
-          >
-            -10 HP
-          </button>
-          
-          <button 
-            onClick={() => takeDamage(25)}
-            disabled={hp <= 0}
-            style={{
-              margin: '0 5px',
-              padding: '10px 20px',
-              backgroundColor: '#d32f2f',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: hp <= 0 ? 'not-allowed' : 'pointer',
-              fontSize: '14px',
-              fontWeight: 'bold',
-              opacity: hp <= 0 ? 0.5 : 1
-            }}
-          >
-            -25 HP
-          </button>
-          
-          <button 
-            onClick={() => heal(20)}
-            disabled={hp >= maxHp}
-            style={{
-              margin: '0 5px',
-              padding: '10px 20px',
-              backgroundColor: '#4CAF50',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: hp >= maxHp ? 'not-allowed' : 'pointer',
-              fontSize: '14px',
-              fontWeight: 'bold',
-              opacity: hp >= maxHp ? 0.5 : 1
-            }}
-          >
-            +20 HP
-          </button>
-          
-          <button 
-            onClick={() => {
-              setHp(maxHp);
-              setProjectiles([]);
-            }}
-            disabled={hp >= maxHp}
-            style={{
-              margin: '0 5px',
-              padding: '10px 20px',
-              backgroundColor: '#2196F3',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: hp >= maxHp ? 'not-allowed' : 'pointer',
-              fontSize: '14px',
-              fontWeight: 'bold',
-              opacity: hp >= maxHp ? 0.5 : 1
-            }}
-          >
-            Full HP
-          </button>
-        </div>
-        
+
+        <button 
+          onClick={resetGame}
+          style={{
+            marginTop: '15px',
+            padding: '12px 30px',
+            backgroundColor: '#c8aa6e',
+            color: '#0a1428',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            fontSize: '16px',
+            fontWeight: 'bold',
+            boxShadow: '0 4px 6px rgba(0,0,0,0.3)'
+          }}
+        >
+          Réinitialiser
+        </button>
+
         {hp <= 0 && (
           <p style={{ 
             marginTop: '15px', 
-            color: '#f44336', 
-            fontSize: '20px', 
-            fontWeight: 'bold' 
+            color: '#e74c3c', 
+            fontSize: '24px', 
+            fontWeight: 'bold',
+            textShadow: '2px 2px 4px rgba(0,0,0,0.8)'
           }}>
-            💀 MORT
+            💀 DEFEATED
           </p>
         )}
+      </div>
+
+      <div style={{ 
+        marginTop: '20px',
+        background: 'rgba(0, 0, 0, 0.5)',
+        padding: '15px',
+        borderRadius: '8px',
+        border: '2px solid #c8aa6e',
+        maxWidth: '1000px',
+        width: '100%'
+      }}>
+        <h3 style={{ color: '#f0e6d2', marginTop: 0 }}>📖 Légende des Skillshots:</h3>
+        
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: '10px',
+          marginTop: '15px'
+        }}>
+          <div style={{ background: 'rgba(0, 255, 136, 0.1)', padding: '10px', borderRadius: '4px', border: '1px solid #00ff88' }}>
+            <strong style={{ color: '#00ff88' }}>🪝 Thresh Q</strong>
+            <p style={{ color: '#c8aa6e', fontSize: '12px', margin: '5px 0 0 0' }}>Hook vert - RAPIDE</p>
+          </div>
+          
+          <div style={{ background: 'rgba(255, 170, 0, 0.1)', padding: '10px', borderRadius: '4px', border: '1px solid #ffaa00' }}>
+            <strong style={{ color: '#ffaa00' }}>🪝 Blitz Q</strong>
+            <p style={{ color: '#c8aa6e', fontSize: '12px', margin: '5px 0 0 0' }}>Hook orange - RAPIDE</p>
+          </div>
+          
+          <div style={{ background: 'rgba(34, 102, 255, 0.1)', padding: '10px', borderRadius: '4px', border: '1px solid #2266ff' }}>
+            <strong style={{ color: '#2266ff' }}>⚓ Nautilus Q</strong>
+            <p style={{ color: '#c8aa6e', fontSize: '12px', margin: '5px 0 0 0' }}>Hook bleu - LARGE</p>
+          </div>
+          
+          <div style={{ background: 'rgba(153, 51, 255, 0.1)', padding: '10px', borderRadius: '4px', border: '1px solid #9933ff' }}>
+            <strong style={{ color: '#9933ff' }}>🌀 Morgana Q</strong>
+            <p style={{ color: '#c8aa6e', fontSize: '12px', margin: '5px 0 0 0' }}>Snare violet - LENT</p>
+          </div>
+          
+          <div style={{ background: 'rgba(255, 255, 102, 0.1)', padding: '10px', borderRadius: '4px', border: '1px solid #ffff66' }}>
+            <strong style={{ color: '#ffff66' }}>✨ Lux Q</strong>
+            <p style={{ color: '#c8aa6e', fontSize: '12px', margin: '5px 0 0 0' }}>Snare jaune - LENT</p>
+          </div>
+          
+          <div style={{ background: 'rgba(255, 221, 0, 0.1)', padding: '10px', borderRadius: '4px', border: '1px solid #ffdd00' }}>
+            <strong style={{ color: '#ffdd00' }}>⚡ Ezreal Q</strong>
+            <p style={{ color: '#c8aa6e', fontSize: '12px', margin: '5px 0 0 0' }}>Doré - Moyen</p>
+          </div>
+          
+          <div style={{ background: 'rgba(255, 102, 0, 0.1)', padding: '10px', borderRadius: '4px', border: '1px solid #ff6600' }}>
+            <strong style={{ color: '#ff6600' }}>🗡️ Nidalee Q</strong>
+            <p style={{ color: '#c8aa6e', fontSize: '12px', margin: '5px 0 0 0' }}>Spear orange - MORTEL</p>
+          </div>
+          
+          <div style={{ background: 'rgba(0, 204, 255, 0.1)', padding: '10px', borderRadius: '4px', border: '1px solid #00ccff' }}>
+            <strong style={{ color: '#00ccff' }}>⚡ Xerath E</strong>
+            <p style={{ color: '#c8aa6e', fontSize: '12px', margin: '5px 0 0 0' }}>Stun cyan</p>
+          </div>
+          
+          <div style={{ background: 'rgba(255, 0, 255, 0.1)', padding: '10px', borderRadius: '4px', border: '1px solid #ff00ff' }}>
+            <strong style={{ color: '#ff00ff' }}>👁️ Vel'Koz Q</strong>
+            <p style={{ color: '#c8aa6e', fontSize: '12px', margin: '5px 0 0 0' }}>Magenta - Peut split</p>
+          </div>
+        </div>
+        
+        <p style={{ color: '#c8aa6e', fontSize: '12px', fontStyle: 'italic', marginTop: '15px', textAlign: 'center' }}>
+          💡 Astuce: Le nom du sort s'affiche au-dessus de chaque projectile pendant le cast et en vol !
+        </p>
       </div>
     </div>
   );
 };
 
-export default MobaCharacter;
+export default LoLDodgeTrainer;
