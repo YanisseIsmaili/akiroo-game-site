@@ -1,0 +1,371 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+const MobaCharacter = () => {
+  const [position, setPosition] = useState({ x: 400, y: 300 });
+  const [targetPosition, setTargetPosition] = useState(null);
+  const [hp, setHp] = useState(100);
+  const [maxHp] = useState(100);
+  const [isMouseDown, setIsMouseDown] = useState(false);
+  const canvasRef = useRef(null);
+  const animationRef = useRef(null);
+
+  const MOVE_SPEED = 200; // pixels par seconde
+  const CHARACTER_SIZE = 30;
+
+  // Fonction pour infliger des dégâts
+  const takeDamage = (damage) => {
+    setHp((currentHp) => Math.max(0, currentHp - damage));
+  };
+
+  // Fonction pour soigner
+  const heal = (amount) => {
+    setHp((currentHp) => Math.min(maxHp, currentHp + amount));
+  };
+
+  // Régénération automatique
+  useEffect(() => {
+    const regenInterval = setInterval(() => {
+      setHp((currentHp) => {
+        if (currentHp < maxHp && currentHp > 0) {
+          return Math.min(maxHp, currentHp + 0.5);
+        }
+        return currentHp;
+      });
+    }, 100);
+
+    return () => clearInterval(regenInterval);
+  }, [maxHp]);
+
+  // Gérer le clic sur le canvas
+  const updateTargetPosition = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    setTargetPosition({ x, y });
+  };
+
+  const handleMouseDown = (e) => {
+    setIsMouseDown(true);
+    updateTargetPosition(e);
+  };
+
+  const handleMouseUp = () => {
+    setIsMouseDown(false);
+  };
+
+  const handleMouseMove = (e) => {
+    if (isMouseDown) {
+      updateTargetPosition(e);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    setIsMouseDown(false);
+  };
+
+  // Animation du mouvement
+  useEffect(() => {
+    if (!targetPosition) return;
+
+    let lastTime = performance.now();
+
+    const animate = (currentTime) => {
+      const deltaTime = (currentTime - lastTime) / 1000; // en secondes
+      lastTime = currentTime;
+
+      setPosition((currentPos) => {
+        const dx = targetPosition.x - currentPos.x;
+        const dy = targetPosition.y - currentPos.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        // Si on est arrivé à destination
+        if (distance < 5) {
+          setTargetPosition(null);
+          return currentPos;
+        }
+
+        // Calculer le mouvement
+        const moveDistance = MOVE_SPEED * deltaTime;
+        const ratio = Math.min(moveDistance / distance, 1);
+
+        return {
+          x: currentPos.x + dx * ratio,
+          y: currentPos.y + dy * ratio
+        };
+      });
+
+      animationRef.current = requestAnimationFrame(animate);
+    };
+
+    animationRef.current = requestAnimationFrame(animate);
+
+    return () => {
+      if (animationRef.current) {
+        cancelAnimationFrame(animationRef.current);
+      }
+    };
+  }, [targetPosition]);
+
+  // Dessiner sur le canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+
+    // Effacer le canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Dessiner la grille de fond
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < canvas.width; i += 50) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i, canvas.height);
+      ctx.stroke();
+    }
+    for (let i = 0; i < canvas.height; i += 50) {
+      ctx.beginPath();
+      ctx.moveTo(0, i);
+      ctx.lineTo(canvas.width, i);
+      ctx.stroke();
+    }
+
+    // Dessiner la cible si elle existe
+    if (targetPosition) {
+      ctx.strokeStyle = '#4CAF50';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(targetPosition.x, targetPosition.y, 15, 0, Math.PI * 2);
+      ctx.stroke();
+      
+      ctx.beginPath();
+      ctx.moveTo(targetPosition.x - 20, targetPosition.y);
+      ctx.lineTo(targetPosition.x + 20, targetPosition.y);
+      ctx.stroke();
+      
+      ctx.beginPath();
+      ctx.moveTo(targetPosition.x, targetPosition.y - 20);
+      ctx.lineTo(targetPosition.x, targetPosition.y + 20);
+      ctx.stroke();
+
+      // Ligne vers la cible
+      ctx.strokeStyle = '#4CAF50';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([5, 5]);
+      ctx.beginPath();
+      ctx.moveTo(position.x, position.y);
+      ctx.lineTo(targetPosition.x, targetPosition.y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // Dessiner le personnage (cercle bleu)
+    ctx.fillStyle = '#2196F3';
+    ctx.beginPath();
+    ctx.arc(position.x, position.y, CHARACTER_SIZE / 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Ombre du personnage
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.beginPath();
+    ctx.ellipse(position.x, position.y + CHARACTER_SIZE / 2 + 5, CHARACTER_SIZE / 2, CHARACTER_SIZE / 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Barre de vie
+    const healthBarWidth = 40;
+    const healthBarHeight = 6;
+    const healthBarX = position.x - healthBarWidth / 2;
+    const healthBarY = position.y - CHARACTER_SIZE - 10;
+
+    // Fond de la barre de vie (rouge)
+    ctx.fillStyle = '#d32f2f';
+    ctx.fillRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+
+    // Barre de vie actuelle (verte/orange/rouge selon HP)
+    const hpPercentage = hp / maxHp;
+    let healthColor;
+    if (hpPercentage > 0.6) {
+      healthColor = '#4CAF50';
+    } else if (hpPercentage > 0.3) {
+      healthColor = '#FF9800';
+    } else {
+      healthColor = '#f44336';
+    }
+    
+    ctx.fillStyle = healthColor;
+    ctx.fillRect(healthBarX, healthBarY, healthBarWidth * hpPercentage, healthBarHeight);
+
+    // Bordure de la barre de vie
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(healthBarX, healthBarY, healthBarWidth, healthBarHeight);
+
+    // Texte HP
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 10px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${Math.round(hp)}/${maxHp}`, position.x, healthBarY - 2);
+
+    // Direction du personnage
+    if (targetPosition) {
+      const dx = targetPosition.x - position.x;
+      const dy = targetPosition.y - position.y;
+      const angle = Math.atan2(dy, dx);
+      
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(
+        position.x + Math.cos(angle) * 8,
+        position.y + Math.sin(angle) * 8,
+        4,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+    }
+
+  }, [position, targetPosition, hp]);
+
+  return (
+    <div style={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      alignItems: 'center', 
+      padding: '20px',
+      fontFamily: 'Arial, sans-serif'
+    }}>
+      <h2 style={{ marginBottom: '10px' }}>Déplacement style MOBA</h2>
+      <p style={{ marginBottom: '20px', color: '#666' }}>
+        Clique ou maintiens le clic pour déplacer le personnage
+      </p>
+      
+      <canvas
+        ref={canvasRef}
+        width={800}
+        height={600}
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+        onMouseMove={handleMouseMove}
+        onMouseLeave={handleMouseLeave}
+        style={{
+          border: '2px solid #333',
+          cursor: 'pointer',
+          backgroundColor: '#f5f5f5',
+          borderRadius: '4px'
+        }}
+      />
+      
+      <div style={{ marginTop: '20px', textAlign: 'center' }}>
+        <p style={{ margin: '5px 0' }}>
+          Position: X: {Math.round(position.x)}, Y: {Math.round(position.y)}
+        </p>
+        {targetPosition && (
+          <p style={{ margin: '5px 0', color: '#4CAF50' }}>
+            Cible: X: {Math.round(targetPosition.x)}, Y: {Math.round(targetPosition.y)}
+          </p>
+        )}
+        <p style={{ 
+          margin: '10px 0', 
+          fontSize: '18px', 
+          fontWeight: 'bold',
+          color: hp > 60 ? '#4CAF50' : hp > 30 ? '#FF9800' : '#f44336'
+        }}>
+          HP: {Math.round(hp)} / {maxHp}
+        </p>
+        
+        <div style={{ marginTop: '15px' }}>
+          <button 
+            onClick={() => takeDamage(10)}
+            disabled={hp <= 0}
+            style={{
+              margin: '0 5px',
+              padding: '10px 20px',
+              backgroundColor: '#f44336',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: hp <= 0 ? 'not-allowed' : 'pointer',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              opacity: hp <= 0 ? 0.5 : 1
+            }}
+          >
+            -10 HP
+          </button>
+          
+          <button 
+            onClick={() => takeDamage(25)}
+            disabled={hp <= 0}
+            style={{
+              margin: '0 5px',
+              padding: '10px 20px',
+              backgroundColor: '#d32f2f',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: hp <= 0 ? 'not-allowed' : 'pointer',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              opacity: hp <= 0 ? 0.5 : 1
+            }}
+          >
+            -25 HP
+          </button>
+          
+          <button 
+            onClick={() => heal(20)}
+            disabled={hp >= maxHp}
+            style={{
+              margin: '0 5px',
+              padding: '10px 20px',
+              backgroundColor: '#4CAF50',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: hp >= maxHp ? 'not-allowed' : 'pointer',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              opacity: hp >= maxHp ? 0.5 : 1
+            }}
+          >
+            +20 HP
+          </button>
+          
+          <button 
+            onClick={() => setHp(maxHp)}
+            disabled={hp >= maxHp}
+            style={{
+              margin: '0 5px',
+              padding: '10px 20px',
+              backgroundColor: '#2196F3',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: hp >= maxHp ? 'not-allowed' : 'pointer',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              opacity: hp >= maxHp ? 0.5 : 1
+            }}
+          >
+            Full HP
+          </button>
+        </div>
+        
+        {hp <= 0 && (
+          <p style={{ 
+            marginTop: '15px', 
+            color: '#f44336', 
+            fontSize: '20px', 
+            fontWeight: 'bold' 
+          }}>
+            💀 MORT
+          </p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default MobaCharacter;
